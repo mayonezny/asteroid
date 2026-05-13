@@ -1,0 +1,185 @@
+# ─── Dev docker compose ───────────────────────────────────────────────────────
+# Запуск:    docker compose up --build
+# Стоп:      docker compose down
+# Логи фронта: docker compose logs -f frontend
+# Логи бэка:   docker compose logs -f manager
+#
+# Что внутри:
+#   - postgres + minio  — стораджи бэка
+#   - manager           — express-сервер (порт 3000, проброшен на хост)
+#   - worker-js/ts/py   — анализаторы по языкам
+#   - frontend          — vite-dev на 5173 с прокси /api → manager:3000
+# Браузер ходит на http://localhost:5173 и видит /api как часть того же origin'а.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-diploma}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-diploma}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [asteroid-net]
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-strongpassword}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [asteroid-net]
+
+  manager:
+    build:
+      context: ./asteroid_backend
+      dockerfile: Dockerfile
+      args:
+        SERVICE_SCRIPT: src/manager/app.js
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      worker-js:
+        condition: service_started
+      worker-ts:
+        condition: service_started
+      worker-py:
+        condition: service_started
+    environment:
+      PORT: 3000
+      MANAGER_PUBLIC_URL: http://manager:3000
+      WORKER_JS_URL: http://worker-js:4001
+      WORKER_TS_URL: http://worker-ts:4002
+      WORKER_PY_URL: http://worker-py:4003
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-admin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-strongpassword}
+      MINIO_SOURCE_BUCKET: preprocessed
+      MINIO_RESULT_BUCKET: processed-files
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-diploma}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_MAX_POOL_SIZE: 10
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev-access-secret-change-me}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev-refresh-secret-change-me}
+      JWT_ACCESS_TTL_SECONDS: 900
+      JWT_REFRESH_TTL_SECONDS: 2592000
+      JWT_REFRESH_COOKIE_NAME: refreshToken
+      JWT_COOKIE_SECURE: "false"
+      DEFAULT_AVATAR_BASE_URL: https://cdn.example.com/avatars
+    ports:
+      - "3000:3000"
+    networks: [asteroid-net]
+
+  worker-js:
+    build:
+      context: ./asteroid_backend
+      dockerfile: Dockerfile
+      args:
+        SERVICE_SCRIPT: src/workers/js/app.js
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-admin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-strongpassword}
+      MINIO_SOURCE_BUCKET: preprocessed
+      MINIO_RESULT_BUCKET: processed-files
+    networks: [asteroid-net]
+
+  worker-ts:
+    build:
+      context: ./asteroid_backend
+      dockerfile: Dockerfile
+      args:
+        SERVICE_SCRIPT: src/workers/typescript/app.js
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-admin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-strongpassword}
+      MINIO_SOURCE_BUCKET: preprocessed
+      MINIO_RESULT_BUCKET: processed-files
+    networks: [asteroid-net]
+
+  worker-py:
+    build:
+      context: ./asteroid_backend
+      dockerfile: Dockerfile.python
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-admin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-strongpassword}
+      MINIO_SOURCE_BUCKET: preprocessed
+      MINIO_RESULT_BUCKET: processed-files
+      WORKER_PY_PORT: 4003
+    networks: [asteroid-net]
+
+  frontend:
+    build:
+      context: ./asteroid-front
+      dockerfile: Dockerfile.dev
+    depends_on:
+      - manager
+    environment:
+      # Vite сам читает VITE_* из окружения, .env.development копирует часть сюда
+      VITE_API_URL: /api
+      VITE_API_TIMEOUT: "15000"
+      VITE_APP_ENV: development
+      VITE_APP_TITLE: Asteroid
+      VITE_ENABLE_DEVTOOLS: "true"
+      VITE_USE_MOCKS: "false"
+      VITE_DEV_PORT: "5173"
+      # Vite-proxy на manager внутри docker-сети
+      VITE_DEV_PROXY_TARGET: http://manager:3000
+    volumes:
+      # Bind-mount исходников для HMR
+      - ./asteroid-front:/app
+      # Анонимный volume для node_modules — не пересекаемся с host'овым
+      - /app/node_modules
+    ports:
+      - "5173:5173"
+    networks: [asteroid-net]
+
+volumes:
+  postgres-data:
+  minio-data:
+
+networks:
+  asteroid-net:
+    driver: bridge

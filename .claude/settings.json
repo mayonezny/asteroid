@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs ls)",
+      "Bash(node --check src/manager/routes.js)",
+      "Bash(node --check src/shared/articles-catalog.js)",
+      "Bash(npm run *)",
+      "Bash(npx eslint *)",
+      "Bash(./node_modules/.bin/eslint \"src/pages/ResearchPage/**/*.{ts,tsx}\" \"src/entities/research/**/*.ts\" \"src/pages/ProjectLoadingPage/**/*.{ts,tsx}\" --max-warnings=999)",
+      "Bash(node_modules/.bin/eslint \"src/pages/ResearchPage/**/*.{ts,tsx}\" \"src/entities/research/**/*.ts\" \"src/pages/ProjectLoadingPage/**/*.{ts,tsx}\")",
+      "Bash(node_modules/.bin/eslint \"src/pages/ResearchPage/**/*.{ts,tsx}\" \"src/entities/research/**/*.ts\" \"src/pages/ProjectLoadingPage/**/*.{ts,tsx}\" --fix)",
+      "Bash(npx tsc *)",
+      "Bash(echo \"TSC EXIT $?\")",
+      "Bash(echo \"BUILD EXIT $?\")",
+      "Bash(docker compose *)"
+    ]
+  }
+}
