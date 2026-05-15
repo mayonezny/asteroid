@@ -152,17 +152,16 @@ services:
 
   frontend:
     build:
-      context: ./asteroid-front
+      context: ./asteroid_front
       dockerfile: Dockerfile
+    container_name: asteroid-frontend
     depends_on:
       - manager
     # Конфиг nginx внешний — можно править без пересборки образа.
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-    ports:
-      - "127.0.0.1:${FRONTEND_HTTP_PORT:-8080}:80"
     restart: unless-stopped
-    networks: [asteroid-net]
+    networks: [asteroid-net, shared-web]
 
 volumes:
   postgres-data:
@@ -171,3 +170,5 @@ volumes:
 networks:
   asteroid-net:
     driver: bridge
+  shared-web:
+    external: true
